@@ -1,80 +1,23 @@
+#include "wmnext/app/server_application.hpp"
+
 #include <cstdlib>
+#include <exception>
 #include <iostream>
-#include <string>
 
-#include <httplib.h>
-#include <nlohmann/json.hpp>
-
-namespace {
-
-using json = nlohmann::json;
-
-constexpr int kPort = 8080;
-
-json make_error_response(const std::string& message) {
-    return json{
-        {"error", message}
-    };
-}
-
-}  // namespace
-
+// 程序主入口只负责最薄的一层调度：
+// 创建应用对象、启动服务，并在最外层兜底处理未捕获异常。
+// 这样 main.cpp 可以始终保持稳定简洁，不随着业务增长而膨胀。
 int main() {
-    httplib::Server server;
-
-    server.Get("/", [](const httplib::Request&, httplib::Response& res) {
-        json body = {
-            {"message", "C++ backend is running"},
-            {"usage", "POST /add with JSON: {\"a\": 1, \"b\": 2}"}
-        };
-        res.set_content(body.dump(), "application/json");
-    });
-
-    server.Post("/add", [](const httplib::Request& req, httplib::Response& res) {
-        try {
-            const json request_body = json::parse(req.body);
-
-            if (!request_body.contains("a") || !request_body.contains("b")) {
-                res.status = 400;
-                res.set_content(
-                    make_error_response("Request JSON must contain numeric fields 'a' and 'b'.").dump(),
-                    "application/json"
-                );
-                return;
-            }
-
-            if (!request_body["a"].is_number() || !request_body["b"].is_number()) {
-                res.status = 400;
-                res.set_content(
-                    make_error_response("Fields 'a' and 'b' must be numbers.").dump(),
-                    "application/json"
-                );
-                return;
-            }
-
-            const double a = request_body["a"].get<double>();
-            const double b = request_body["b"].get<double>();
-
-            json response_body = {
-                {"result", a + b}
-            };
-
-            res.set_content(response_body.dump(), "application/json");
-        } catch (const json::parse_error&) {
-            res.status = 400;
-            res.set_content(
-                make_error_response("Invalid JSON body.").dump(),
-                "application/json"
-            );
-        }
-    });
-
-    std::cout << "Server listening on http://0.0.0.0:" << kPort << '\n';
-
-    if (!server.listen("0.0.0.0", kPort)) {
-        std::cerr << "Failed to start server on port " << kPort << '\n';
-        return EXIT_FAILURE;
+    try {
+        wmnext::app::ServerApplication application;
+        return application.run();
+    } catch (const std::exception& ex) {
+        // 输出标准异常信息，便于在终端快速定位启动失败原因。
+        std::cerr << "Unhandled exception: " << ex.what() << '\n';
+    } catch (...) {
+        // 兜底处理未知异常，避免进程静默崩溃。
+        std::cerr << "Unhandled unknown exception.\n";
     }
 
-    return EXIT_SUCCESS;
+    return EXIT_FAILURE;
 }

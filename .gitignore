@@ -1,2 +1,4 @@
 /vcpkg/
 /build/
+.conan
+CMakeUserPresets.json
