@@ -25,6 +25,7 @@ private:
     using ConnectionHandleSet = std::set<ConnectionHandle, std::owner_less<ConnectionHandle>>;
 
     [[nodiscard]] http::Json make_message(std::string event, http::Json payload) const;
+    [[nodiscard]] std::string make_timestamp() const;
     void send_to_all(std::string payload);
 
     WebSocketServer server_;

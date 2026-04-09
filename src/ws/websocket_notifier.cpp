@@ -106,8 +106,25 @@ void WebSocketNotifier::notify(http::Json message) {
 http::Json WebSocketNotifier::make_message(std::string event, http::Json payload) const {
     return http::Json{
         {"event", std::move(event)},
-        {"payload", std::move(payload)}
+        {"payload", std::move(payload)},
+        {"timestamp", make_timestamp()},
+        {"request_id", nullptr}
     };
+}
+
+std::string WebSocketNotifier::make_timestamp() const {
+    const auto now = std::chrono::system_clock::now();
+    const auto time = std::chrono::system_clock::to_time_t(now);
+    std::tm utc_time{};
+#if defined(_WIN32)
+    gmtime_s(&utc_time, &time);
+#else
+    gmtime_r(&time, &utc_time);
+#endif
+
+    std::ostringstream stream;
+    stream << std::put_time(&utc_time, "%Y-%m-%dT%H:%M:%SZ");
+    return stream.str();
 }
 
 void WebSocketNotifier::send_to_all(std::string payload) {

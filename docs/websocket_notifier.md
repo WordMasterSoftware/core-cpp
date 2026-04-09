@@ -64,11 +64,13 @@ websocket_notifier.notify(
   "payload": {
     "order_id": 12345,
     "status": "created"
-  }
+  },
+  "timestamp": "2026-04-09T10:00:00Z",
+  "request_id": null
 }
 ```
 
-这是推荐用法。业务语义更清晰，也方便前端按 `event` 分发处理。
+这是推荐用法。业务语义更清晰，也方便前端按 `event` 分发处理。`timestamp` 由服务端统一生成，`request_id` 预留给后续链路追踪或请求关联。
 
 ### 2. 直接推送完整消息体
 
@@ -90,22 +92,26 @@ websocket_notifier.notify(http::Json{
 
 推荐做法是把 `WebSocketNotifier&` 作为参数注入到注册函数、服务类或业务处理函数中。
 
-例如当前 `POST /add` 的实现就是这样接入的：
+例如当前 `GET /api/tts` 的处理流程里就会在成功后推送事件：
 
 ```cpp
-void register_math_api(httplib::Server& server, ws::WebSocketNotifier& websocket_notifier) {
-    server.Post("/add", [&websocket_notifier](const httplib::Request& request, httplib::Response& response) {
-        const double result = 1 + 2;
-
-        websocket_notifier.notify(
-            "math.add.completed",
-            http::Json{
-                {"result", result}
-            }
-        );
-    });
-}
+websocket_notifier.notify(
+    "tts.pronunciation.requested",
+    http::Json{
+        {"language", "en-US"},
+        {"word", "apple"},
+        {"provider", "mock-tts"}
+    }
+);
 ```
+
+服务端消息建议统一用于：
+
+- 学习进度推送
+- 考试结果推送
+- 系统通知
+- 多端同步事件
+- TTS 请求或资源就绪事件
 
 ## 客户端接收示例
 
@@ -124,6 +130,6 @@ socket.onmessage = (event) => {
 ## 使用建议
 
 - 推荐统一使用 `event + payload` 结构，不要让不同模块随意定义完全不同的顶层字段。
-- `event` 建议使用稳定的点分命名，例如 `math.add.completed`、`task.progress.updated`。
+- `event` 建议使用稳定的点分命名，例如 `tts.pronunciation.requested`、`study.progress.updated`。
 - `payload` 中只放客户端真正需要的数据，避免把内部实现细节直接暴露出去。
 - 如果后续需要支持定向推送、分组订阅或多路由广播，建议在当前封装基础上继续扩展，而不是让业务层直接操作 WebSocket 底层连接。

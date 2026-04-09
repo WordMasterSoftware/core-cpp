@@ -1,7 +1,8 @@
 #include "wmnext/app/server_application.hpp"
 
-#include "wmnext/api/math_api.hpp"
+#include "wmnext/api/api_routes.hpp"
 #include "wmnext/api/root_api.hpp"
+#include "wmnext/service/tts_service.hpp"
 #include "wmnext/ws/websocket_notifier.hpp"
 
 #include <cstdlib>
@@ -25,6 +26,7 @@ constexpr int kWebSocketPort = 8182;
 // 3. 启动监听并返回退出码。
 int ServerApplication::run() const {
     httplib::Server server;
+    service::MockTtsService tts_service;
     ws::WebSocketNotifier websocket_notifier;
 
     if (!websocket_notifier.start("0.0.0.0", kWebSocketPort)) {
@@ -32,12 +34,11 @@ int ServerApplication::run() const {
         return EXIT_FAILURE;
     }
 
-    // 在这里集中装配所有 API 模块，方便未来继续扩展更多业务域。
-    api::register_root_api(server);
-    api::register_math_api(server, websocket_notifier);
+    // HTTP 路由只在这里集中注册，后续新增领域模块时继续按模块扩展。
+    api::register_api_routes(server, tts_service, websocket_notifier);
 
     std::cout << "Server listening on http://0.0.0.0:" << kPort << '\n';
-    std::cout << "WebSocket queue listening on ws://0.0.0.0:" << kWebSocketPort << "/queue" << '\n';
+    std::cout << "WebSocket listening on ws://0.0.0.0:" << kWebSocketPort << "/queue" << '\n';
 
     // listen 是阻塞调用；只有启动失败或服务结束时才会继续往下执行。
     if (!server.listen("0.0.0.0", kPort)) {
