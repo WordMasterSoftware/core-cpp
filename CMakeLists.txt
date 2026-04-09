@@ -19,6 +19,8 @@ find_package(httplib CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(websocketpp CONFIG REQUIRED)
 find_package(asio CONFIG REQUIRED)
+find_package(libpqxx CONFIG REQUIRED)
+find_package(redis++ CONFIG REQUIRED)
 
 # CONFIGURE_DEPENDS 会让 CMake 在重新配置时感知新增或删除的源码文件。
 file(GLOB_RECURSE WMNEXT_BACKEND_SOURCES CONFIGURE_DEPENDS
@@ -39,6 +41,8 @@ target_link_libraries(wmnext_backend
         nlohmann_json::nlohmann_json
         websocketpp::websocketpp
         asio::asio
+        libpqxx::pqxx
+        redis++::redis++_static
         wmnext_flite
 )
 
