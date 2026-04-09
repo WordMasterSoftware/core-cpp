@@ -1,5 +1,15 @@
 #include "wmnext/service/tts_service.hpp"
 
+#if defined(WMNEXT_WITH_FLITE)
+#include <flite/flite.h>
+
+extern "C" {
+cst_voice* register_cmu_us_awb(void);
+cst_voice* register_cmu_us_kal(void);
+cst_voice* register_cmu_us_slt(void);
+}
+#endif
+
 namespace wmnext::service {
 
 namespace {
@@ -11,6 +21,8 @@ constexpr double kSilenceDurationSeconds = 0.03;
 constexpr std::uint16_t kBitsPerSample = 16;
 constexpr std::uint16_t kChannelCount = 1;
 constexpr std::int16_t kAmplitude = 9000;
+constexpr std::string_view kAudioIndexFileName = "index.txt";
+std::mutex g_audio_cache_mutex;
 
 [[nodiscard]] std::uint64_t fnv1a_hash(std::string_view value) {
     constexpr std::uint64_t kOffsetBasis = 14695981039346656037ULL;
@@ -114,6 +126,71 @@ void write_little_endian_32(std::ostream& stream, std::uint32_t value) {
     return stream.good();
 }
 
+[[nodiscard]] std::string flite_voice_for_language(std::string_view language) {
+    if (language == "en-GB") {
+        return "awb";
+    }
+
+    if (language == "en" || language == "en-US") {
+        return "slt";
+    }
+
+    return "kal";
+}
+
+[[nodiscard]] bool can_use_flite_for_language(std::string_view language) {
+    return language == "en-US" || language == "en-GB" || language == "en";
+}
+
+#if defined(WMNEXT_WITH_FLITE)
+[[nodiscard]] cst_voice* get_flite_voice(std::string_view language) {
+    if (language == "en-GB") {
+        return register_cmu_us_awb();
+    }
+
+    if (language == "en" || language == "en-US") {
+        return register_cmu_us_slt();
+    }
+
+    return register_cmu_us_kal();
+}
+
+[[nodiscard]] bool generate_flite_audio(
+    const std::filesystem::path& output_path,
+    const domain::TtsPronunciationRequest& request
+) {
+    static std::once_flag init_flag;
+    std::call_once(init_flag, [] {
+        flite_init();
+    });
+
+    if (!can_use_flite_for_language(request.language)) {
+        return false;
+    }
+
+    auto* voice = get_flite_voice(request.language);
+    if (voice == nullptr) {
+        return false;
+    }
+
+    cst_wave* wave = flite_text_to_wave(request.word.c_str(), voice);
+    if (wave == nullptr) {
+        return false;
+    }
+
+    cst_wave_save_riff(wave, output_path.string().c_str());
+    delete_wave(wave);
+    return std::filesystem::exists(output_path);
+}
+#else
+[[nodiscard]] bool generate_flite_audio(
+    const std::filesystem::path&,
+    const domain::TtsPronunciationRequest&
+) {
+    return false;
+}
+#endif
+
 [[nodiscard]] std::string make_cache_key(const domain::TtsPronunciationRequest& request) {
     return request.language + "\n" + request.word;
 }
@@ -127,6 +204,64 @@ void write_little_endian_32(std::ostream& stream, std::uint32_t value) {
 
 [[nodiscard]] std::string make_audio_url(const std::filesystem::path& file_path) {
     return "/audio_cache/" + file_path.filename().string();
+}
+
+[[nodiscard]] std::filesystem::path make_index_file_path(const std::filesystem::path& cache_directory) {
+    return cache_directory / kAudioIndexFileName;
+}
+
+[[nodiscard]] std::unordered_map<std::string, std::string> load_audio_index(const std::filesystem::path& index_file_path) {
+    std::unordered_map<std::string, std::string> index_entries;
+    std::ifstream stream(index_file_path);
+    if (!stream.is_open()) {
+        return index_entries;
+    }
+
+    std::string line;
+    while (std::getline(stream, line)) {
+        const auto separator = line.find('\t');
+        if (separator == std::string::npos) {
+            continue;
+        }
+
+        const auto hash = line.substr(0, separator);
+        const auto file_name = line.substr(separator + 1);
+        if (!hash.empty() && !file_name.empty()) {
+            index_entries[hash] = file_name;
+        }
+    }
+
+    return index_entries;
+}
+
+[[nodiscard]] bool rewrite_audio_index(
+    const std::filesystem::path& index_file_path,
+    const std::unordered_map<std::string, std::string>& index_entries
+) {
+    std::ofstream stream(index_file_path, std::ios::trunc);
+    if (!stream.is_open()) {
+        return false;
+    }
+
+    for (const auto& [hash, file_name] : index_entries) {
+        stream << hash << '\t' << file_name << '\n';
+    }
+
+    return stream.good();
+}
+
+[[nodiscard]] bool append_audio_index_entry(
+    const std::filesystem::path& index_file_path,
+    std::string_view hash,
+    std::string_view file_name
+) {
+    std::ofstream stream(index_file_path, std::ios::app);
+    if (!stream.is_open()) {
+        return false;
+    }
+
+    stream << hash << '\t' << file_name << '\n';
+    return stream.good();
 }
 
 [[nodiscard]] TtsPronunciationResult make_failure_result(
@@ -151,6 +286,8 @@ MockTtsService::MockTtsService(std::string cache_directory)
 }
 
 TtsPronunciationResult MockTtsService::get_pronunciation(const domain::TtsPronunciationRequest& request) const {
+    std::lock_guard lock(g_audio_cache_mutex);
+
     const auto cache_directory = std::filesystem::path(cache_directory_);
     std::error_code error_code;
     std::filesystem::create_directories(cache_directory, error_code);
@@ -158,27 +295,45 @@ TtsPronunciationResult MockTtsService::get_pronunciation(const domain::TtsPronun
         return make_failure_result(request, "Failed to create audio cache directory.");
     }
 
-    const auto file_path = make_audio_cache_file_path(cache_directory, request);
+    const auto index_file_path = make_index_file_path(cache_directory);
+    auto index_entries = load_audio_index(index_file_path);
+    const auto request_hash = hash_to_hex(fnv1a_hash(make_cache_key(request)));
 
-    if (std::filesystem::exists(file_path, error_code) && !error_code) {
-        return TtsPronunciationResult{
-            .status = true,
-            .language = request.language,
-            .word = request.word,
-            .audio_url = make_audio_url(file_path),
-            .provider = "mock-tts",
-            .cached = true,
-            .message = "Mock pronunciation audio served from cache."
-        };
+    if (const auto index_it = index_entries.find(request_hash); index_it != index_entries.end()) {
+        const auto file_path = cache_directory / index_it->second;
+        if (std::filesystem::exists(file_path, error_code) && !error_code) {
+            return TtsPronunciationResult{
+                .status = true,
+                .language = request.language,
+                .word = request.word,
+                .audio_url = make_audio_url(file_path),
+                .provider = "mock-tts",
+                .cached = true,
+                .message = "Mock pronunciation audio served from cache."
+            };
+        }
+
+        if (error_code) {
+            return make_failure_result(request, "Failed to access audio cache.");
+        }
+
+        index_entries.erase(index_it);
+        if (!rewrite_audio_index(index_file_path, index_entries)) {
+            return make_failure_result(request, "Failed to repair audio cache index.");
+        }
     }
 
-    if (error_code) {
-        return make_failure_result(request, "Failed to access audio cache.");
+    const auto file_path = cache_directory / (request_hash + ".wav");
+    if (!can_use_flite_for_language(request.language)) {
+        return make_failure_result(request, "Embedded Flite currently supports only configured English voices.");
     }
 
-    const auto samples = build_mock_audio_samples(request.word);
-    if (!write_wav_file(file_path, samples)) {
-        return make_failure_result(request, "Failed to generate mock pronunciation audio.");
+    if (!generate_flite_audio(file_path, request)) {
+        return make_failure_result(request, "Embedded Flite failed to generate pronunciation audio.");
+    }
+
+    if (!append_audio_index_entry(index_file_path, request_hash, file_path.filename().string())) {
+        return make_failure_result(request, "Audio file generated but failed to update audio cache index.");
     }
 
     return TtsPronunciationResult{
@@ -186,9 +341,9 @@ TtsPronunciationResult MockTtsService::get_pronunciation(const domain::TtsPronun
         .language = request.language,
         .word = request.word,
         .audio_url = make_audio_url(file_path),
-        .provider = "mock-tts",
+        .provider = "flite-embedded",
         .cached = false,
-        .message = "Mock pronunciation metadata generated successfully."
+        .message = "Embedded Flite pronunciation audio generated successfully."
     };
 }
 

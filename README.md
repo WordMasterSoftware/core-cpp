@@ -8,6 +8,15 @@ C++ 重构版本，下一代的 WM 后端系统
 
 [下载](https://mirrors.aliyun.com/gnu/gcc/gcc-15.2.0/) 或 手动编译 最新版本编译器
 
+- TTS 当前改为构建阶段自动拉取并静态编译 `Flite` 源码，运行时不依赖系统 `flite` 命令。
+- 第一次构建需要可访问 GitHub，以便拉取 `festvox/flite` 源码。
+
+- 项目编译：
+
+```bash
+bash core-cpp/build.sh
+```
+
 - API 文档
 
 [总API文档手册](./docs/README.md)

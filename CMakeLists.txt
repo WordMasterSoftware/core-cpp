@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.28)
 
 project(WMNextBackend LANGUAGES CXX)
 
+include(cmake/flite.cmake)
+
 # 导出编译数据库
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_CXX_STANDARD 20)
@@ -24,6 +26,7 @@ file(GLOB_RECURSE WMNEXT_BACKEND_SOURCES CONFIGURE_DEPENDS
 )
 
 add_executable(wmnext_backend ${WMNEXT_BACKEND_SOURCES})
+add_dependencies(wmnext_backend wmnext_flite_project)
 
 target_include_directories(wmnext_backend
     PRIVATE
@@ -36,6 +39,7 @@ target_link_libraries(wmnext_backend
         nlohmann_json::nlohmann_json
         websocketpp::websocketpp
         asio::asio
+        wmnext_flite
 )
 
 target_precompile_headers(wmnext_backend
