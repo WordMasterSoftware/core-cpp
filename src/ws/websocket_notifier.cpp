@@ -1,19 +1,19 @@
-#include "wmnext/ws/websocket_message_queue_server.hpp"
+#include "wmnext/ws/websocket_notifier.hpp"
 
 namespace wmnext::ws {
 
 namespace {
 
 constexpr auto kMessageType = websocketpp::frame::opcode::text;
-constexpr std::string_view kQueueEndpoint = "/queue";
+constexpr std::string_view kEndpoint = "/queue";
 
 }  // namespace
 
-WebSocketMessageQueueServer::~WebSocketMessageQueueServer() {
+WebSocketNotifier::~WebSocketNotifier() {
     stop();
 }
 
-bool WebSocketMessageQueueServer::start(const std::string& host, std::uint16_t port, mq::MessageQueue& message_queue) {
+bool WebSocketNotifier::start(const std::string& host, std::uint16_t port) {
     if (is_running_) {
         return true;
     }
@@ -30,7 +30,7 @@ bool WebSocketMessageQueueServer::start(const std::string& host, std::uint16_t p
 
     server_.set_validate_handler([this](ConnectionHandle connection) {
         const auto server_connection = server_.get_con_from_hdl(connection);
-        return server_connection->get_resource() == kQueueEndpoint;
+        return server_connection->get_resource() == kEndpoint;
     });
 
     server_.set_close_handler([this](ConnectionHandle connection) {
@@ -51,19 +51,13 @@ bool WebSocketMessageQueueServer::start(const std::string& host, std::uint16_t p
     }
 
     is_running_ = true;
-
     server_thread_ = std::thread([this] {
         server_.run();
     });
-
-    dispatcher_thread_ = std::thread([this, &message_queue] {
-        dispatch_messages(message_queue);
-    });
-
     return true;
 }
 
-void WebSocketMessageQueueServer::stop() {
+void WebSocketNotifier::stop() {
     if (!is_running_) {
         return;
     }
@@ -95,30 +89,29 @@ void WebSocketMessageQueueServer::stop() {
     if (server_thread_.joinable()) {
         server_thread_.join();
     }
-
-    if (dispatcher_thread_.joinable()) {
-        dispatcher_thread_.join();
-    }
 }
 
-http::Json WebSocketMessageQueueServer::make_envelope(const mq::QueueMessage& message) const {
+void WebSocketNotifier::notify(std::string event, http::Json payload) {
+    notify(make_message(std::move(event), std::move(payload)));
+}
+
+void WebSocketNotifier::notify(http::Json message) {
+    if (!is_running_) {
+        return;
+    }
+
+    send_to_all(message.dump());
+}
+
+http::Json WebSocketNotifier::make_message(std::string event, http::Json payload) const {
     return http::Json{
-        {"message_id", message.id},
-        {"event", message.event},
-        {"payload", message.payload}
+        {"event", std::move(event)},
+        {"payload", std::move(payload)}
     };
 }
 
-void WebSocketMessageQueueServer::dispatch_messages(mq::MessageQueue& message_queue) {
-    mq::QueueMessage message{};
-
-    while (message_queue.wait_and_pop(message)) {
-        send_to_all(make_envelope(message).dump());
-    }
-}
-
-void WebSocketMessageQueueServer::send_to_all(const std::string& payload) {
-    server_.get_io_service().post([this, payload] {
+void WebSocketNotifier::send_to_all(std::string payload) {
+    server_.get_io_service().post([this, payload = std::move(payload)] {
         std::vector<ConnectionHandle> connections;
 
         {

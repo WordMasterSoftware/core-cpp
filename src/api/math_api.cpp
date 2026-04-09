@@ -1,7 +1,7 @@
 #include "wmnext/api/math_api.hpp"
 
 #include "wmnext/http/json_response.hpp"
-#include "wmnext/mq/message_queue.hpp"
+#include "wmnext/ws/websocket_notifier.hpp"
 
 #include <httplib.h>
 #include <nlohmann/json.hpp>
@@ -23,8 +23,8 @@ bool has_valid_operands(const http::Json& request_body) {
 
 // 注册数学接口。
 // 这里采用“注册函数 + lambda 处理器”的形式，便于把不同业务域拆到不同文件中维护。
-void register_math_api(httplib::Server& server, mq::MessageQueue& message_queue) {
-    server.Post("/add", [&message_queue](const httplib::Request& request, httplib::Response& response) {
+void register_math_api(httplib::Server& server, ws::WebSocketNotifier& websocket_notifier) {
+    server.Post("/add", [&websocket_notifier](const httplib::Request& request, httplib::Response& response) {
         try {
             // 先将请求体解析为 JSON；如果格式非法，会进入下方 parse_error 分支。
             const http::Json request_body = http::Json::parse(request.body);
@@ -49,7 +49,7 @@ void register_math_api(httplib::Server& server, mq::MessageQueue& message_queue)
 
             http::set_json_response(response, response_body);
 
-            message_queue.publish(
+            websocket_notifier.notify(
                 "math.add.completed",
                 http::Json{
                     {"a", a},

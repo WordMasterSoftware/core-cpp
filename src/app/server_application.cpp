@@ -2,8 +2,7 @@
 
 #include "wmnext/api/math_api.hpp"
 #include "wmnext/api/root_api.hpp"
-#include "wmnext/mq/message_queue.hpp"
-#include "wmnext/ws/websocket_message_queue_server.hpp"
+#include "wmnext/ws/websocket_notifier.hpp"
 
 #include <cstdlib>
 #include <httplib.h>
@@ -26,17 +25,16 @@ constexpr int kWebSocketPort = 8182;
 // 3. 启动监听并返回退出码。
 int ServerApplication::run() const {
     httplib::Server server;
-    mq::MessageQueue message_queue;
-    ws::WebSocketMessageQueueServer websocket_server;
+    ws::WebSocketNotifier websocket_notifier;
 
-    if (!websocket_server.start("0.0.0.0", kWebSocketPort, message_queue)) {
+    if (!websocket_notifier.start("0.0.0.0", kWebSocketPort)) {
         std::cerr << "Failed to start WebSocket server on port " << kWebSocketPort << '\n';
         return EXIT_FAILURE;
     }
 
     // 在这里集中装配所有 API 模块，方便未来继续扩展更多业务域。
     api::register_root_api(server);
-    api::register_math_api(server, message_queue);
+    api::register_math_api(server, websocket_notifier);
 
     std::cout << "Server listening on http://0.0.0.0:" << kPort << '\n';
     std::cout << "WebSocket queue listening on ws://0.0.0.0:" << kWebSocketPort << "/queue" << '\n';
@@ -44,13 +42,11 @@ int ServerApplication::run() const {
     // listen 是阻塞调用；只有启动失败或服务结束时才会继续往下执行。
     if (!server.listen("0.0.0.0", kPort)) {
         std::cerr << "Failed to start server on port " << kPort << '\n';
-        message_queue.shutdown();
-        websocket_server.stop();
+        websocket_notifier.stop();
         return EXIT_FAILURE;
     }
 
-    message_queue.shutdown();
-    websocket_server.stop();
+    websocket_notifier.stop();
     return EXIT_SUCCESS;
 }
 
