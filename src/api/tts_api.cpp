@@ -47,24 +47,29 @@ void register_tts_api(
 
         const auto result = tts_service.get_pronunciation(pronunciation_request);
         const http::Json response_body = {
+            {"status", result.status},
+            {"audio_url", result.audio_url},
+            {"cached", result.cached},
             {"language", result.language},
             {"word", result.word},
-            {"audio_url", result.audio_url},
-            {"provider", result.provider},
-            {"cached", result.cached},
-            {"message", result.message}
+            {"message", result.message},
+            {"provider", result.provider}
         };
 
-        http::set_json_response(response, response_body);
+        http::set_json_response(response, response_body, result.status ? 200 : 500);
 
-        websocket_notifier.notify(
-            "tts.pronunciation.requested",
-            http::Json{
-                {"language", result.language},
-                {"word", result.word},
-                {"provider", result.provider}
-            }
-        );
+        if (result.status) {
+            websocket_notifier.notify(
+                "tts.pronunciation.requested",
+                http::Json{
+                    {"language", result.language},
+                    {"word", result.word},
+                    {"provider", result.provider},
+                    {"audio_url", result.audio_url},
+                    {"cached", result.cached}
+                }
+            );
+        }
     });
 }
 

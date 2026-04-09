@@ -5,6 +5,7 @@
 namespace wmnext::service {
 
 struct TtsPronunciationResult {
+    bool status;
     std::string language;
     std::string word;
     std::string audio_url;
@@ -24,9 +25,14 @@ public:
 
 class MockTtsService final : public TtsService {
 public:
+    explicit MockTtsService(std::string cache_directory);
+
     [[nodiscard]] TtsPronunciationResult get_pronunciation(
         const domain::TtsPronunciationRequest& request
     ) const override;
+
+private:
+    std::string cache_directory_;
 };
 
 }  // namespace wmnext::service

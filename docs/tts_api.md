@@ -21,12 +21,13 @@ GET /api/tts?language=en-US&word=apple
 
 ```json
 {
+  "status": true,
+  "audio_url": "/audio_cache/7a55fb4387f62d53.wav",
+  "cached": false,
   "language": "en-US",
   "word": "apple",
-  "audio_url": "https://tts.wordmaster.next/v1/audio/en-US/apple.mp3",
-  "provider": "mock-tts",
-  "cached": false,
-  "message": "Mock pronunciation metadata generated successfully."
+  "message": "Mock pronunciation metadata generated successfully.",
+  "provider": "mock-tts"
 }
 ```
 
@@ -50,5 +51,10 @@ GET /api/tts?language=en-US&word=apple
 ## 说明
 
 - 第一版接口返回音频元数据，不直接返回音频流。
+- `audio_url` 返回的是后端可访问路径，不是外部 HTTP/HTTPS 绝对地址。
+- 音频文件实际生成并缓存到服务端的 `./audio_cache` 目录下。
+- 缓存文件名不使用单词原文，而是基于 `language + word` 的稳定哈希生成。
+- 如果命中相同请求，接口会直接复用缓存文件，并将 `cached` 返回为 `true`。
+- `status` 表示当前请求是否成功拿到了可用音频文件。
 - 当前底层使用可替换的 `TtsService` 抽象，便于后续接入真实 TTS 提供方。
 - 每次成功调用后，服务端会通过 WebSocket 推送 `tts.pronunciation.requested` 事件。

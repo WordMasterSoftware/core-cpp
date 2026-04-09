@@ -17,6 +17,8 @@ namespace {
 // 如果后续需要从配置文件、环境变量或命令行读取端口，可以从这里演进出去。
 constexpr int kPort = 8181;
 constexpr int kWebSocketPort = 8182;
+constexpr std::string_view kAudioCacheDirectory = "./audio_cache";
+constexpr std::string_view kAudioCacheRoute = "/audio_cache";
 
 }  // namespace
 
@@ -26,7 +28,19 @@ constexpr int kWebSocketPort = 8182;
 // 3. 启动监听并返回退出码。
 int ServerApplication::run() const {
     httplib::Server server;
-    service::MockTtsService tts_service;
+    std::error_code error_code;
+    std::filesystem::create_directories(kAudioCacheDirectory, error_code);
+    if (error_code) {
+        std::cerr << "Failed to prepare audio cache directory: " << error_code.message() << '\n';
+        return EXIT_FAILURE;
+    }
+
+    if (!server.set_mount_point(std::string{kAudioCacheRoute}, std::string{kAudioCacheDirectory})) {
+        std::cerr << "Failed to mount audio cache directory.\n";
+        return EXIT_FAILURE;
+    }
+
+    service::MockTtsService tts_service(std::string{kAudioCacheDirectory});
     ws::WebSocketNotifier websocket_notifier;
 
     if (!websocket_notifier.start("0.0.0.0", kWebSocketPort)) {
